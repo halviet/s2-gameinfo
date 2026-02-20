@@ -1,22 +1,21 @@
-// The universal KeyValues node - can be a string, number, boolean, or nested object
-export type KVValue = string | number | boolean | KVObject | KVValue[];
-
-// Object with string keys and any KVValue
+export type KVPrimitive = string | number | boolean;
+// Conditional value type, stored as [value, '[ condition ]']
+export type KVCond = [KVPrimitive, string];
+export type KVValue = KVPrimitive | KVObject | KVCond;
 export interface KVObject {
     [key: string]: KVValue;
 }
 
-// Specific GameInfo interface extends the generic structure
-export interface GameInfo extends KVObject {
-    game: string;
-    title: string;
-    type?: string;
-    // ... you can add known fields for autocomplete, but everything else is caught by index signature
+// Composer options for formatting control
+export interface ComposeOptions {
+    indent?: string;           // Indentation string (default: '\t')
+    lineEnding?: string;       // Line ending (default: '\n')
+    quoteKeys?: 'auto' | 'always' | 'never';  // When to quote keys
+    quoteValues?: 'auto' | 'always' | 'never'; // When to quote values
 }
 
 // Parser options
 export interface ParseOptions {
-    preserveDuplicates?: boolean; // If true, duplicate keys become arrays
-    preserveComments?: boolean;   // If true, comments are stored in special keys
-    parseConditionals?: boolean;  // If true, parse [$LINUX] conditions
+    overrideDuplicates?: boolean;
+    parseConditionals?: boolean;
 }

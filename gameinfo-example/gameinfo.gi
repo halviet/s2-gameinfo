@@ -111,7 +111,6 @@
 
 		"SkipRedundantChangeCallbacks"	"1"
 	}
-
 	RenderSystem
 	{
 		IndexBufferPoolSizeMB 32

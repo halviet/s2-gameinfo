@@ -1,4 +1,4 @@
-import type { KVValue, KVObject, ParseOptions } from './types';
+import type {KVValue, KVObject, ParseOptions} from './types';
 
 export class KeyValuesParser {
     private pos = 0;
@@ -8,9 +8,8 @@ export class KeyValuesParser {
     constructor(content: string, options: ParseOptions = {}) {
         this.content = content;
         this.options = {
-            preserveDuplicates: true,
-            preserveComments: false,
-            parseConditionals: false,
+            overrideDuplicates: true,
+            parseConditionals: true,
             ...options
         };
     }
@@ -61,13 +60,15 @@ export class KeyValuesParser {
             return this.parseBlock();
         }
 
-        // Array value [ ... ] (conditional syntax)
-        if (char === '[' && this.options.parseConditionals) {
-            return this.parseConditional();
+        // String/number/boolean value
+        const val = this.parseScalar();
+
+        if (this.checkForConditional()) {
+            if (this.options.parseConditionals) return [val, this.parseConditional()] as KVValue;
+            else this.skipConditional();
         }
 
-        // String/number/boolean value
-        return this.parseScalar();
+        return val;
     }
 
     private parseBlock(): KVObject {
@@ -89,17 +90,11 @@ export class KeyValuesParser {
 
             const value = this.parseValue();
 
-            // Handle duplicate keys (e.g., multiple "Game" entries)
-            if (key in obj && this.options.preserveDuplicates) {
-                const existing = obj[key];
-                if (Array.isArray(existing)) {
-                    existing.push(value);
-                } else {
-                    obj[key] = [existing, value];
-                }
-            } else {
-                obj[key] = value;
+            if (key in obj && !this.options.overrideDuplicates) {
+                continue;
             }
+
+            obj[key] = value;
         }
 
         this.consume('}');
@@ -216,20 +211,57 @@ export class KeyValuesParser {
         this.pos++;
     }
 
-    private parseConditional(): string {
-        // Simple implementation: just skip the conditional for now
+    private checkForConditional(): boolean {
+        this.skipWhitespace();
+        return this.peek() === '[';
+    }
+
+    private skipConditional() {
+        while (this.pos < this.content.length) {
+            const char = this.content[this.pos];
+
+            // Check for new line
+            if (char === '\n' || char === '\r') {
+                throw new Error(`Expected closing ']' for condition at position ${this.pos}, but got new line`);
+            }
+
+            if (char != ']') {
+                this.pos++;
+                continue;
+            }
+
+            break;
+        }
+
+        this.consume(']');
+    }
+
+    private parseConditional(): KVValue {
         this.consume('[');
-        let depth = 1;
-        while (this.pos < this.content.length && depth > 0) {
-            if (this.peek() === '[') depth++;
-            if (this.peek() === ']') depth--;
+
+        // Conditional: read until "]"
+        const start = this.pos;
+        while (this.pos < this.content.length) {
+            const char = this.peek();
+
+            if (char === ']') {
+                break;
+            }
+
+            if (char === '\n' || char === '\r' || char === '}') {
+                throw new Error(`Expected closing ']' for condition at position ${this.pos}, but got new line`);
+            }
+
             this.pos++;
         }
-        return '';
+
+        const cond = this.content.slice(start, this.pos);
+        this.consume(']');
+
+        return cond;
     }
 }
 
-// Convenience function
 export function parseKeyValues(content: string, options?: ParseOptions): KVObject {
     return new KeyValuesParser(content, options).parse();
 }

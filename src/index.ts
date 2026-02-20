@@ -1,18 +1,41 @@
+// Parser
 import {parseKeyValues} from "./parser";
-import {GameInfo, KVObject, KVValue} from "./types";
+import {ComposeOptions, KVObject} from "./types";
+import {composeKeyValues} from "./composer";
 
 export { KeyValuesParser, parseKeyValues } from './parser';
-export type { KVValue, KVObject, ParseOptions, GameInfo } from './types';
+export type { ParseOptions } from './types';
 
-// Convenience for GameInfo specifically
-export function parseGameInfo(content: string): GameInfo {
-    return parseKeyValues(content) as GameInfo;
+// Composer
+export { KeyValuesComposer, composeKeyValues } from './composer';
+export type { ComposeOptions } from './types';
+
+// Types
+export type {
+    KVValue,
+    KVObject,
+    KVCond,
+    KVPrimitive
+} from './types';
+
+// GameInfo specific helpers
+export function parseGameInfo(content: string) {
+    return parseKeyValues(content);
 }
 
-// Helper to access nested values safely
-export function getPath(obj: KVObject, path: string): KVValue | undefined {
-    return path.split('.').reduce((curr: any, key) => {
-        if (curr === undefined || curr === null) return undefined;
-        return curr[key];
-    }, obj);
+export function composeGameInfo(
+    obj: KVObject,
+    options?: ComposeOptions
+): string {
+    return composeKeyValues(obj, 'GameInfo', options);
+}
+
+// Round-trip helper
+export function modifyGameInfo(
+    content: string,
+    modifier: (obj: KVObject) => void
+): string {
+    const parsed = parseGameInfo(content);
+    modifier(parsed);
+    return composeGameInfo(parsed);
 }

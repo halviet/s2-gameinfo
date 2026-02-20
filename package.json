@@ -3,7 +3,7 @@
   "type": "module",
   "version": "0.0.0",
   "private": true,
-  "description": "Source 2 gameinfo.gi Parser/Encoder.",
+  "description": "Bidirectional parser for Source 2 engine gameinfo.gi files. Parse Valve game configurations to JSON and compose them back.",
   "exports": {
     ".": "./dist/index.mjs",
     "./package.json": "./package.json"
@@ -22,6 +22,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
+    "@types/node": "^25.3.0",
     "@vitest/coverage-v8": "^4.0.18",
     "tsdown": "^0.18.1",
     "typescript": "^5.9.3",
