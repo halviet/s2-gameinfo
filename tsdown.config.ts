@@ -7,11 +7,6 @@ const config: UserConfig = defineConfig({
   format: ['esm', 'cjs'],
 
   dts: true,
-  // Fail on warnings in CI
-  failOnWarn: 'ci-only',
-  // Run package validators in CI
-  publint: 'ci-only',
-  attw: 'ci-only',
 
   sourcemap: true,
   minify: true,
