@@ -1,4 +1,4 @@
-import type {KVValue, KVObject, ComposeOptions, KVPrimitive} from './types';
+import {KVValue, KVObject, ComposeOptions, KVPrimitive, isKVCond} from './types';
 
 export class KeyValuesComposer {
     private options: Required<ComposeOptions>;
@@ -6,6 +6,7 @@ export class KeyValuesComposer {
 
     constructor(options: ComposeOptions = {}) {
         this.options = {
+            rootKey: 'GameInfo',
             indent: '\t',
             lineEnding: '\n',
             quoteKeys: 'always',
@@ -14,9 +15,9 @@ export class KeyValuesComposer {
         };
     }
 
-    compose(obj: KVObject, rootKey = 'GameInfo'): string {
+    compose(obj: KVObject): string {
         const lines: string[] = [];
-        this.composeNode(rootKey, obj, lines);
+        this.composeNode(this.options.rootKey, obj, lines);
         return lines.join(this.options.lineEnding);
     }
 
@@ -39,16 +40,32 @@ export class KeyValuesComposer {
             return;
         }
 
+        // Check for KVCond or KVDuplicate
         if (Array.isArray(value)) {
-            const formattedValue = this.formatValue(value[0] as KVPrimitive);
-            lines.push(`${indent}${formattedKey} ${formattedValue} [${this.escapeString(value[1])}]`);
+            // KVCond value
+            if (isKVCond(value)) {
+                const formattedValue = this.formatValue(value[0] as KVPrimitive);
+                lines.push(`${indent}${formattedKey} ${formattedValue} [${this.escapeString(value[1])}]`);
+                return;
+            }
+
+            // KVDuplicate value
+            // Doesn't work if one of value items is KVObject
+            value.forEach(v => {
+                if (this.isObject(v)) {
+                    throw new Error(`Duplicated key "${key}" contains an object`);
+                }
+
+                const formattedValue = this.formatValue(v as KVPrimitive);
+                lines.push(`${indent}${formattedKey} ${formattedValue}`);
+            })
+
             return;
         }
 
         // Primitive value
         const formattedValue = this.formatValue(value as KVPrimitive);
         lines.push(`${indent}${formattedKey} ${formattedValue}`);
-
     }
 
     private isObject(value: KVValue): value is KVObject {
@@ -112,11 +129,10 @@ export class KeyValuesComposer {
     }
 }
 
-// Convenience function
-export function composeKeyValues(
+// Composes GameInfo file
+export function composeGI(
     obj: KVObject,
-    rootKey?: string,
     options?: ComposeOptions
 ): string {
-    return new KeyValuesComposer(options).compose(obj, rootKey);
+    return new KeyValuesComposer(options).compose(obj);
 }

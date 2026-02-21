@@ -1,7 +1,7 @@
 {
-  "name": "tsdown-starter",
+  "name": "s2-gameinfo",
   "type": "module",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Bidirectional parser for Source 2 engine gameinfo.gi files. Parse Valve game configurations to JSON and compose them back.",
   "exports": {

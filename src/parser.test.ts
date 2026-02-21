@@ -1,98 +1,150 @@
 import {describe, it, expect} from 'vitest'
-import {parseKeyValues} from "./parser";
-import {readFileSync} from 'fs'
+import {parseGI} from "./parser";
 import {KVValue} from "./types";
 
-const gameinfoSimple = './gameinfo-example/gameinfo-simple.gi'
-
-describe('parseKeyValues', () => {
+describe('parseGI', () => {
     it('single block', () => {
-        const gi = kvBlock("GameInfo", kvBlock("Test", ""));
-        expect(parseKeyValues(gi)).toStrictEqual({Test: {}});
+        const gi = kvBlock("GameInfo", kvBlock("Test"));
+        expect(parseGI(gi)).toStrictEqual({Test: {}});
     });
 
     it('multiple blocks', () => {
         const gi = kvBlock("GameInfo", kvBlock("Test1", ""), kvBlock("Test2"));
-        expect(parseKeyValues(gi)).toStrictEqual({Test1: {}, Test2: {}});
+        expect(parseGI(gi)).toStrictEqual({Test1: {}, Test2: {}});
     });
 
     it('quoted key', () => {
         const gi = kvBlock("GameInfo", kvPair('"test"', 1));
-        expect(parseKeyValues(gi)).toStrictEqual({test: 1})
+        expect(parseGI(gi)).toStrictEqual({test: 1});
     });
 
     it('unquoted key', () => {
         const gi = kvBlock("GameInfo", kvPair("test", 1));
-        expect(parseKeyValues(gi)).toStrictEqual({test: 1})
+        expect(parseGI(gi)).toStrictEqual({test: 1});
     });
 
     it('string value', () => {
         const gi = kvBlock("GameInfo", kvPair("test", "value"));
-        expect(parseKeyValues(gi)).toStrictEqual({test: "value"})
+        expect(parseGI(gi)).toStrictEqual({test: "value"});
     });
 
     it('number value', () => {
         const gi = kvBlock("GameInfo", kvPair("test", 10));
-        expect(parseKeyValues(gi)).toStrictEqual({test: 10})
+        expect(parseGI(gi)).toStrictEqual({test: 10});
     });
 
     it('condition value', () => {
         const gi = kvBlock("GameInfo", kvPair("test", '"value" [ $COND ]'));
-        expect(parseKeyValues(gi, {parseConditionals: true})).toStrictEqual({test: ["value", " $COND "]})
+        expect(parseGI(gi, {parseConditionals: true})).toStrictEqual({test: ["value", " $COND "]});
     });
 
     it('do not parse condition value', () => {
         const gi = kvBlock("GameInfo", kvPair("test", '"value" [ $COND ]'));
-        expect(parseKeyValues(gi, {parseConditionals: false})).toStrictEqual({test: "value"})
+        expect(parseGI(gi, {parseConditionals: false})).toStrictEqual({test: "value"});
+    });
+
+    it('on parseConditionals: true - should throw Error: Expected closing \']\' for condition', () => {
+        const gi = kvBlock("GameInfo", kvPair("test", `"value" [ $COND `));
+        expect(() => parseGI(gi, {parseConditionals: true})).toThrowError(/Expected closing ']' for condition/);
+    });
+
+    it('on parseConditionals: false - should throw Error: Expected closing \']\' for condition', () => {
+        const gi = kvBlock("GameInfo", kvPair("test", `"value" [ $COND `));
+        expect(() => parseGI(gi, {parseConditionals: false})).toThrowError(/Expected closing ']' for condition/);
     });
 
     it('with comment', () => {
         const gi = kvBlock("GameInfo", kvPair("test", "value // Test comment"));
-        expect(parseKeyValues(gi, {parseConditionals: false})).toStrictEqual({test: "value"})
+        expect(parseGI(gi)).toStrictEqual({test: "value"});
     });
 
-    it('gameinfo-simple', () => {
-        const expected = {
-            test_string: "string",
-            test_number: 20,
-            test_float: 3.0,
-            test_bool: 1,
-            test_conditional: ["1", " $LINUX || !$OSX "],
+    it('with multi-line comment', () => {
+        const gi = kvBlock("GameInfo", `/* Test\nComment */`, kvPair("test", "value"));
+        expect(parseGI(gi)).toStrictEqual({test: "value"});
+    });
 
-            string_keys: {
-                string_key1: 20,
-                string_key2: 1,
-                string_key3: 3.0,
-            },
-            string_keys_and_values: {
-                string_key1: "1",
-                string_key2: "string",
-                string_key3: "3.0",
-                string_key4: "true",
-            },
-            unquoted_string_value: {
-                "key1": "value1",
-                "key2": "value2",
-            },
+    it('handle value with "/"', () => {
+        const gi = kvBlock("GameInfo", kvPair("test", "value/value"));
+        expect(parseGI(gi)).toStrictEqual({test: "value/value"});
+    });
 
-            object_with_children: {
-                children: {
-                    key: "value",
-                },
-                parent: {
-                    children: {
-                        key: "value",
-                    }
-                }
-            },
+    it('handle value with "*"', () => {
+        const gi = kvBlock("GameInfo", kvPair("test", "value_*VALUE*"));
+        expect(parseGI(gi)).toStrictEqual({test: "value_*VALUE*"});
+    });
 
-            empty_object: {},
+    it('single kv', () => {
+        const gi = kvPair("test", "value");
+        expect(parseGI(gi)).toStrictEqual({test: "value"});
+    });
 
-            string_with_slash: "path/to/file"
-        }
+    it('empty key', () => {
+        const gi = kvBlock("GameInfo", "test");
+        expect(parseGI(gi)).toStrictEqual({test: true});
+    });
 
-        const content = readFileSync(gameinfoSimple, 'utf-8')
-        expect(parseKeyValues(content, {parseConditionals: true})).toStrictEqual(expected)
+    it('duplicated key', () => {
+        const gi = kvBlock("GameInfo",
+            kvPair("test", "value"),
+            kvPair("test", "value2"),
+        );
+        expect(parseGI(gi)).toStrictEqual({test: ["value", "value2"]});
+    });
+
+    it('duplicated key with object value', () => {
+        const gi = kvBlock("GameInfo",
+            kvPair("test", "value"),
+            kvBlock("test",
+                kvPair("test", "value")
+            )
+        );
+        expect(parseGI(gi)).toStrictEqual({test: ["value", {test: "value"}]});
+    });
+
+    it('override on duplicate, keepDuplicates: false', () => {
+        const gi = kvBlock("GameInfo",
+            kvPair("test", "value"),
+            kvPair("test", "value2"),
+        );
+        expect(parseGI(gi, {overrideDuplicates: true, keepDuplicates: false})).toStrictEqual({test: "value2"});
+    });
+
+    it('do not override on duplicate, keepDuplicates: false', () => {
+        const gi = kvBlock("GameInfo",
+            kvPair("test", "value"),
+            kvPair("test", "value2"),
+        );
+        expect(parseGI(gi, {overrideDuplicates: false, keepDuplicates: false})).toStrictEqual({test: "value"});
+    });
+
+    it('single \\', () => {
+        const gi = kvBlock("GameInfo", kvPair("test", `"test\\value"`));
+        expect(parseGI(gi)).toStrictEqual({test: "test\\value"});
+    });
+
+    it('escaped \\\\', () => {
+        const gi = kvBlock("GameInfo", kvPair("test", `"test\\\\value"`));
+        expect(parseGI(gi)).toStrictEqual({test: "test\\value"});
+    });
+
+    it('escaped \"', () => {
+        const gi = kvBlock("GameInfo", kvPair("test", `"\\"value\\""`));
+        expect(parseGI(gi)).toStrictEqual({test: '\"value\"'});
+    });
+
+    it('escaped \\n', () => {
+        const gi = kvBlock("GameInfo", kvPair("test", `"value\\n"`));
+        expect(parseGI(gi)).toStrictEqual({test: "value\n"});
+    });
+
+    it('escaped \\t', () => {
+        const gi = kvBlock("GameInfo", kvPair("test", `"value\\t"`));
+        expect(parseGI(gi)).toStrictEqual({test: "value\t"});
+    });
+
+    it('should throw Error: Unterminated string', () => {
+        const gi = kvBlock("GameInfo", kvPair("test", `"value`));
+        expect(() => parseGI(gi)).toThrowError("Unterminated string");
     });
 })
 
@@ -108,5 +160,5 @@ function kvBlock(key: string, ...content: string[]): string {
 }
 
 function kvPair(key: string, value: KVValue): string {
-    return `${key}\t${value}`;
+    return `${key} ${value}`;
 }

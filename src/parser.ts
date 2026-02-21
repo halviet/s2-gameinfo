@@ -1,4 +1,4 @@
-import type {KVValue, KVObject, ParseOptions} from './types';
+import {createDuplicate, isKVCond, isKVDuplicate, KVObject, KVValue, ParseOptions} from './types';
 
 export class KeyValuesParser {
     private pos = 0;
@@ -8,7 +8,8 @@ export class KeyValuesParser {
     constructor(content: string, options: ParseOptions = {}) {
         this.content = content;
         this.options = {
-            overrideDuplicates: true,
+            keepDuplicates: true,
+            overrideDuplicates: false,
             parseConditionals: true,
             ...options
         };
@@ -90,7 +91,21 @@ export class KeyValuesParser {
 
             const value = this.parseValue();
 
-            if (key in obj && !this.options.overrideDuplicates) {
+            if (key in obj && this.options.keepDuplicates) {
+                const existing = obj[key];
+
+                if (!Array.isArray(existing) || isKVCond(existing)) {
+                   obj[key] = createDuplicate([existing, value]);
+                   continue;
+                }
+
+                if (isKVDuplicate(existing)) {
+                    existing.push(value);
+                    continue;
+                }
+            }
+
+            if (key in obj && !this.options.keepDuplicates && !this.options.overrideDuplicates) {
                 continue;
             }
 
@@ -153,7 +168,7 @@ export class KeyValuesParser {
                     case '\\': result += '\\'; break;
                     case 'n': result += '\n'; break;
                     case 't': result += '\t'; break;
-                    default: result += next;
+                    default: result += "\\" + next;
                 }
                 this.pos++;
             } else {
@@ -225,12 +240,9 @@ export class KeyValuesParser {
                 throw new Error(`Expected closing ']' for condition at position ${this.pos}, but got new line`);
             }
 
-            if (char != ']') {
-                this.pos++;
-                continue;
-            }
+            if (char === ']') break;
 
-            break;
+            this.pos++;
         }
 
         this.consume(']');
@@ -262,6 +274,6 @@ export class KeyValuesParser {
     }
 }
 
-export function parseKeyValues(content: string, options?: ParseOptions): KVObject {
+export function parseGI(content: string, options?: ParseOptions): KVObject {
     return new KeyValuesParser(content, options).parse();
 }
