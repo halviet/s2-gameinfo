@@ -4,15 +4,36 @@
   "version": "1.0.0",
   "private": true,
   "description": "Bidirectional parser for Source 2 engine gameinfo.gi files. Parse Valve game configurations to JSON and compose them back.",
+  "keywords": [
+    "typescript",
+    "source2",
+    "gameinfo"
+  ],
+  "author": "halviet",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/halviet/s2-gameinfo.git"
+  },
+  "bugs": {
+    "type": "git",
+    "url": "https://github.com/halviet/s2-gameinfo"
+  },
+  "homepage": "https://github.com/halviet/s2-gameinfo#readme",
+  "LICENSE": "MIT",
   "exports": {
-    ".": "./dist/index.mjs",
+    ".": {
+      "require": "./dist/index.cjs",
+      "import": "./dist/index.mjs"
+    },
     "./package.json": "./package.json"
   },
-  "main": "./dist/index.mjs",
+  "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
-  "types": "./dist/index.d.mts",
+  "types": "./dist/index.d.cts",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsdown",

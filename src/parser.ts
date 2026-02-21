@@ -1,4 +1,5 @@
-import {createDuplicate, isKVCond, isKVDuplicate, KVObject, KVValue, ParseOptions} from './types';
+import type {KVObject, KVValue, ParseOptions} from './types';
+import {createDuplicate, isKVCond, isKVDuplicate} from './types';
 
 export class KeyValuesParser {
     private pos = 0;
@@ -93,6 +94,11 @@ export class KeyValuesParser {
 
             if (key in obj && this.options.keepDuplicates) {
                 const existing = obj[key];
+
+                if (existing === undefined) {
+                    obj[key] = value;
+                    continue;
+                }
 
                 if (!Array.isArray(existing) || isKVCond(existing)) {
                    obj[key] = createDuplicate([existing, value]);

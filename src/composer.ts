@@ -1,4 +1,5 @@
-import {KVValue, KVObject, ComposeOptions, KVPrimitive, isKVCond} from './types';
+import type {KVValue, KVObject, ComposeOptions, KVPrimitive} from './types';
+import {isKVCond} from './types';
 
 export class KeyValuesComposer {
     private options: Required<ComposeOptions>;
