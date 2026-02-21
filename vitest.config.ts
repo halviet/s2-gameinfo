@@ -1,9 +1,10 @@
-import { defineConfig } from 'vitest/config'
+import type { UserConfig } from 'vite'
+import {defineConfig} from 'vitest/config'
 
-export default defineConfig({
+const config: UserConfig = defineConfig({
     test: {
-        globals: true,           // Use describe/test/expect without imports
-        environment: 'node',     // Use 'jsdom' if testing DOM-related code
+        globals: true, // Use describe/test/expect without imports
+        environment: 'node', // Use 'jsdom' if testing DOM-related code
         include: ['test/**/*.test.ts', 'src/**/*.test.ts'],
         coverage: {
             provider: "v8",
@@ -12,3 +13,4 @@ export default defineConfig({
         }
     }
 })
+export default config
