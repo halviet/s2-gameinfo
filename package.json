@@ -1,7 +1,7 @@
 {
   "name": "s2-gameinfo",
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": false,
   "description": "Bidirectional parser for Source 2 engine gameinfo.gi files. Parse Valve game configurations to JSON and compose them back.",
   "keywords": [

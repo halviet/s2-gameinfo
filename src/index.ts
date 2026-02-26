@@ -8,6 +8,8 @@ export type {
     KVCond,
     KVDuplicate,
     KVPrimitive,
-
     DuplicateBrand,
+
+    isKVDuplicate,
+    isKVCond,
 } from './types';
