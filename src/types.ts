@@ -46,7 +46,7 @@ export function isKVCond(value: KVValue): value is KVCond {
 }
 
 
-function isKVPrimitive(value: unknown): value is KVPrimitive {
+export function isKVPrimitive(value: unknown): value is KVPrimitive {
     const type = typeof value;
     return type === 'string' || type === 'number' || type === 'boolean';
 }

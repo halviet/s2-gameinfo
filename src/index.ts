@@ -9,7 +9,10 @@ export type {
     KVDuplicate,
     KVPrimitive,
     DuplicateBrand,
+} from './types';
 
+export {
     isKVDuplicate,
     isKVCond,
+    isKVPrimitive
 } from './types';
