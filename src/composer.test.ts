@@ -1,6 +1,6 @@
 import {describe, it, expect} from 'vitest'
 import {composeGI} from "./composer";
-import {KVObject} from "./types";
+import {createDuplicate, type KVObject} from "./types";
 
 describe('composeGI', () => {
     it('single block', () => {
@@ -104,5 +104,15 @@ describe('composeGI', () => {
         expect(composeGI(kvObj, {
             quoteKeys: 'auto',
         })).toEqual('GameInfo\n{\n\t"key test" "value"\n}');
+    });
+
+    it('duplicate key', () => {
+        const kvObj: KVObject = {"key": createDuplicate(["value1", "value2"])};
+        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value1"\n\t"key" "value2"\n}');
+    });
+
+    it('duplicate key with object value', () => {
+        const kvObj: KVObject = {"key": createDuplicate(["value1", {"key2": "value2"} as KVObject])};
+        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value1"\n\t"key"\n\t{\n\t\t"key2" "value2"\n\t}\n}');
     });
 })

@@ -51,10 +51,20 @@ export class KeyValuesComposer {
             }
 
             // KVDuplicate value
-            // Doesn't work if one of value items is KVObject
             value.forEach(v => {
                 if (this.isObject(v)) {
-                    throw new Error(`Duplicated key "${key}" contains an object`);
+                    // Block value { ... }
+                    lines.push(`${indent}${formattedKey}`);
+                    lines.push(`${indent}{`);
+                    this.level++;
+
+                    for (const [childKey, childValue] of Object.entries(v)) {
+                        this.composeNode(childKey, childValue, lines);
+                    }
+
+                    this.level--;
+                    lines.push(`${indent}}`);
+                    return;
                 }
 
                 const formattedValue = this.formatValue(v as KVPrimitive);
