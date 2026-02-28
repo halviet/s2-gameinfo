@@ -14,5 +14,6 @@ export type {
 export {
     isKVDuplicate,
     isKVCond,
-    isKVPrimitive
+    isKVPrimitive,
+    createDuplicate
 } from './types';
