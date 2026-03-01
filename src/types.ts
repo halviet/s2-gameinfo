@@ -4,9 +4,17 @@ export type KVPrimitive = string | number | boolean;
 export type KVCond = [KVPrimitive, string];
 
 export const DuplicateBrand: unique symbol = Symbol('DuplicateBrand');
-export type KVDuplicate = KVValue[] & { [DuplicateBrand]: true };
+export type KVDuplicate = (KVValue[] & { [DuplicateBrand]: true });
+export type KVWrappedDuplicate = {
+    __type: 'duplicate';
+    values: KVValue[];
+};
 
-export type KVValue = KVPrimitive | KVObject | KVCond | KVDuplicate;
+export type KVValue = KVPrimitive | KVObject | KVCond | KVDuplicate | KVWrappedDuplicate;
+
+export interface KVObject {
+    [key: string]: KVValue;
+}
 
 /**
  * Creates a KVDuplicate from values.
@@ -24,12 +32,29 @@ export function createDuplicate(values: KVValue[]): KVDuplicate {
 }
 
 /**
+ * Creates a KVWrappedDuplicate from values.
+ * Wraps values into object and applies __type: 'duplicate'
+ */
+export function createWrappedDuplicate(values: KVValue[]): KVWrappedDuplicate {
+    return { __type: 'duplicate', values };
+}
+
+/**
  * Checks if value is a {@link KVDuplicate}.
  * Works regardless of array length
  */
 export function isKVDuplicate(value: KVValue): value is KVDuplicate {
     return Array.isArray(value) &&
         DuplicateBrand in value;
+}
+
+/**
+ * Checks if value is a {@link KVWrappedDuplicate}.
+ */
+export function isKVWrappedDuplicate(value: KVValue): value is KVWrappedDuplicate {
+    return typeof value === 'object' &&
+        value !== null &&
+        (value as any).__type === 'duplicate';
 }
 
 /**
@@ -49,10 +74,6 @@ export function isKVCond(value: KVValue): value is KVCond {
 export function isKVPrimitive(value: unknown): value is KVPrimitive {
     const type = typeof value;
     return type === 'string' || type === 'number' || type === 'boolean';
-}
-
-export interface KVObject {
-    [key: string]: KVValue;
 }
 
 // Composer options for formatting control
@@ -121,6 +142,13 @@ export interface ParseOptions {
      * @default false
      */
     overrideDuplicates?: boolean;
+
+    /**
+     * Parses Duplicates as Object with embedded  "__type" field
+     *
+     * @default false
+     */
+    wrapDuplicates?: boolean;
 
     /**
      * Whether to parse conditional statements

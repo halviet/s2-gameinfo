@@ -1,5 +1,5 @@
-import type {KVObject, KVValue, ParseOptions} from './types';
-import {createDuplicate, isKVCond, isKVDuplicate} from './types';
+import {createWrappedDuplicate, isKVWrappedDuplicate, type KVObject, type KVValue, type ParseOptions} from './types';
+import {createDuplicate, isKVDuplicate} from './types';
 
 export class KeyValuesParser {
     private pos = 0;
@@ -11,6 +11,7 @@ export class KeyValuesParser {
         this.options = {
             keepDuplicates: true,
             overrideDuplicates: false,
+            wrapDuplicates: false,
             parseConditionals: true,
             ...options
         };
@@ -22,7 +23,7 @@ export class KeyValuesParser {
         const rootValue = this.parseValue();
 
         // If root has a single key (like "GameInfo"), return its content
-        if (typeof rootValue === 'object' && !Array.isArray(rootValue) && rootKey) {
+        if (typeof rootValue === 'object' && !Array.isArray(rootValue) && !isKVWrappedDuplicate(rootValue) && rootKey) {
             return rootValue;
         }
 
@@ -100,12 +101,22 @@ export class KeyValuesParser {
                     continue;
                 }
 
-                if (!Array.isArray(existing) || isKVCond(existing)) {
-                   obj[key] = createDuplicate([existing, value]);
-                   continue;
+                if (!Array.isArray(existing) && !this.options.wrapDuplicates) {
+                    obj[key] = createDuplicate([existing, value]);
+                    continue;
                 }
 
-                if (isKVDuplicate(existing)) {
+                if (!Array.isArray(existing) && !isKVWrappedDuplicate(existing) && this.options.wrapDuplicates) {
+                    obj[key] = createWrappedDuplicate([existing, value]);
+                    continue;
+                }
+
+                if (this.options.wrapDuplicates && isKVWrappedDuplicate(existing)) {
+                    existing.values.push(value);
+                    continue;
+                }
+
+                if (!this.options.wrapDuplicates && isKVDuplicate(existing)) {
                     existing.push(value);
                     continue;
                 }

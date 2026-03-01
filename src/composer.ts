@@ -1,4 +1,4 @@
-import type {KVValue, KVObject, ComposeOptions, KVPrimitive} from './types';
+import {type KVValue, type KVObject, type ComposeOptions, type KVPrimitive, isKVWrappedDuplicate} from './types';
 import {isKVCond} from './types';
 
 export class KeyValuesComposer {
@@ -51,26 +51,14 @@ export class KeyValuesComposer {
             }
 
             // KVDuplicate value
-            value.forEach(v => {
-                if (this.isObject(v)) {
-                    // Block value { ... }
-                    lines.push(`${indent}${formattedKey}`);
-                    lines.push(`${indent}{`);
-                    this.level++;
+            this.formatDuplicates(formattedKey, value, lines);
 
-                    for (const [childKey, childValue] of Object.entries(v)) {
-                        this.composeNode(childKey, childValue, lines);
-                    }
+            return;
+        }
 
-                    this.level--;
-                    lines.push(`${indent}}`);
-                    return;
-                }
-
-                const formattedValue = this.formatValue(v as KVPrimitive);
-                lines.push(`${indent}${formattedKey} ${formattedValue}`);
-            })
-
+        // Check for KVWrappedDuplicate
+        if (!Array.isArray(value) && isKVWrappedDuplicate(value)) {
+            this.formatDuplicates(formattedKey, value.values, lines);
             return;
         }
 
@@ -79,8 +67,32 @@ export class KeyValuesComposer {
         lines.push(`${indent}${formattedKey} ${formattedValue}`);
     }
 
+    private formatDuplicates(key: string, values: KVValue[], lines: string[]): void {
+        const indent = this.options.indent.repeat(this.level);
+
+        values.forEach(v => {
+            if (this.isObject(v)) {
+                // Block value { ... }
+                lines.push(`${indent}${key}`);
+                lines.push(`${indent}{`);
+                this.level++;
+
+                for (const [childKey, childValue] of Object.entries(v)) {
+                    this.composeNode(childKey, childValue, lines);
+                }
+
+                this.level--;
+                lines.push(`${indent}}`);
+                return;
+            }
+
+            const formattedValue = this.formatValue(v as KVPrimitive);
+            lines.push(`${indent}${key} ${formattedValue}`);
+        })
+    }
+
     private isObject(value: KVValue): value is KVObject {
-        return typeof value === 'object' && value !== null && !Array.isArray(value);
+        return typeof value === 'object' && value !== null && !Array.isArray(value) && !isKVWrappedDuplicate(value);
     }
 
     private formatKey(key: string): string {
