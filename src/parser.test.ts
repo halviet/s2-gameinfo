@@ -1,6 +1,6 @@
 import {describe, it, expect} from 'vitest'
 import {parseGI} from "./parser";
-import {KVValue} from "./types";
+import {createWrappedDuplicate, type KVValue} from "./types";
 
 describe('parseGI', () => {
     it('single block', () => {
@@ -115,6 +115,40 @@ describe('parseGI', () => {
             kvPair("test", "value2"),
         );
         expect(parseGI(gi, {overrideDuplicates: false, keepDuplicates: false})).toStrictEqual({test: "value"});
+    });
+
+    it('duplicated key, wrapDuplicates: true', () => {
+        const gi = kvBlock("GameInfo",
+            kvPair("test", "value"),
+            kvPair("test", "value2"),
+        );
+        expect(parseGI(gi, {wrapDuplicates: true})).toStrictEqual({test: createWrappedDuplicate(["value", "value2"])});
+    });
+
+    it('duplicated key with object value, wrapDuplicates: true', () => {
+        const gi = kvBlock("GameInfo",
+            kvPair("test", "value"),
+            kvBlock("test",
+                kvPair("test", "value")
+            )
+        );
+        expect(parseGI(gi, {wrapDuplicates: true})).toStrictEqual({test: createWrappedDuplicate(["value", {test: "value"}])});
+    });
+
+    it('override on duplicate, keepDuplicates: false; wrapDuplicates: true', () => {
+        const gi = kvBlock("GameInfo",
+            kvPair("test", "value"),
+            kvPair("test", "value2"),
+        );
+        expect(parseGI(gi, {overrideDuplicates: true, keepDuplicates: false, wrapDuplicates: true})).toStrictEqual({test: "value2"});
+    });
+
+    it('do not override on duplicate, keepDuplicates: false; wrapDuplicates: true', () => {
+        const gi = kvBlock("GameInfo",
+            kvPair("test", "value"),
+            kvPair("test", "value2"),
+        );
+        expect(parseGI(gi, {overrideDuplicates: false, keepDuplicates: false, wrapDuplicates: true})).toStrictEqual({test: "value"});
     });
 
     it('single \\', () => {

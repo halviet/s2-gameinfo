@@ -1,6 +1,6 @@
 import {describe, it, expect} from 'vitest'
 import {composeGI} from "./composer";
-import {createDuplicate, type KVObject} from "./types";
+import {createDuplicate, createWrappedDuplicate, type KVObject} from "./types";
 
 describe('composeGI', () => {
     it('single block', () => {
@@ -114,5 +114,43 @@ describe('composeGI', () => {
     it('duplicate key with object value', () => {
         const kvObj: KVObject = {"key": createDuplicate(["value1", {"key2": "value2"} as KVObject])};
         expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value1"\n\t"key"\n\t{\n\t\t"key2" "value2"\n\t}\n}');
+    });
+
+    it('wrapped duplicate key', () => {
+        const kvObj: KVObject = {"key": createWrappedDuplicate(["value1", "value2"])};
+        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value1"\n\t"key" "value2"\n}');
+    });
+
+    it('wrapped duplicate key with object value', () => {
+        const kvObj: KVObject = {"key": createWrappedDuplicate(["value1", {"key2": "value2"} as KVObject])};
+        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value1"\n\t"key"\n\t{\n\t\t"key2" "value2"\n\t}\n}');
+    });
+
+    it('comment in header', () => {
+        const kvObj: KVObject = {key: 1};
+        expect(composeGI(kvObj, {
+            comments: { header: ["Test comment"] }
+        })).toEqual('// Test comment\n"GameInfo"\n{\n\t"key" 1\n}');
+    });
+
+    it('multi-line comment in header', () => {
+        const kvObj: KVObject = {key: 1};
+        expect(composeGI(kvObj, {
+            comments: { header: ["Test comment", "Test comment 2"] }
+        })).toEqual('// Test comment\n// Test comment 2\n"GameInfo"\n{\n\t"key" 1\n}');
+    });
+
+    it('comment in convars', () => {
+        const kvObj: KVObject = {"ConVars": {key: 1}};
+        expect(composeGI(kvObj, {
+            comments: { convars: ["Test comment"] }
+        })).toEqual('"GameInfo"\n{\n\t// Test comment\n\t"ConVars"\n\t{\n\t\t"key" 1\n\t}\n}');
+    });
+
+    it('multi-line comment in convars', () => {
+        const kvObj: KVObject = {"ConVars": {key: 1}};
+        expect(composeGI(kvObj, {
+            comments: { convars: ["Test comment", "Test comment 2"] }
+        })).toEqual('"GameInfo"\n{\n\t// Test comment\n\t// Test comment 2\n\t"ConVars"\n\t{\n\t\t"key" 1\n\t}\n}');
     });
 })
