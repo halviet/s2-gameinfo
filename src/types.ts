@@ -120,6 +120,20 @@ export interface ComposeOptions {
      * @default "always"
      */
     quoteValues?: 'auto' | 'always' | 'never';
+
+
+    /**
+     * Simple comments.
+     *
+     * - `header` - Inject comments on top of the file
+     * - `convars` - Inject comments on top of the ConVars object
+     *
+     * @deafult null
+     */
+    comments?: {
+        header?: string[];
+        convars?: string[];
+    } | null;
 }
 
 // Parser options
@@ -144,7 +158,7 @@ export interface ParseOptions {
     overrideDuplicates?: boolean;
 
     /**
-     * Parses Duplicates as Object with embedded  "__type" field
+     * Parses Duplicates as Object with embedded "__type" field
      *
      * @default false
      */

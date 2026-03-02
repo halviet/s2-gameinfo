@@ -12,18 +12,28 @@ export class KeyValuesComposer {
             lineEnding: '\n',
             quoteKeys: 'always',
             quoteValues: 'always',
+            comments: null,
             ...options
         };
     }
 
     compose(obj: KVObject): string {
         const lines: string[] = [];
+        if (this.options.comments !== null && this.options.comments.header !== undefined) {
+            this.formatComments(this.options.comments.header, lines, '')
+        }
+
         this.composeNode(this.options.rootKey, obj, lines);
         return lines.join(this.options.lineEnding);
     }
 
     private composeNode(key: string, value: KVValue, lines: string[]): void {
         const indent = this.options.indent.repeat(this.level);
+
+        if (key === "ConVars" && this.options.comments !== null && this.options.comments.convars !== undefined) {
+            this.formatComments(this.options.comments.convars, lines, indent);
+        }
+
         const formattedKey = this.formatKey(key);
 
         if (this.isObject(value)) {
@@ -126,6 +136,12 @@ export class KeyValuesComposer {
             default:
                 return this.needsQuoting(value) ? `"${this.escapeString(value)}"` : value;
         }
+    }
+
+    private formatComments(comments: string[], lines: string[], indent: string): void {
+        comments.forEach(c => {
+            lines.push(`${indent}// ${c}`);
+        })
     }
 
     private needsQuoting(str: string): boolean {
