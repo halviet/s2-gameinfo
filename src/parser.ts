@@ -1,296 +1,145 @@
-import {createWrappedDuplicate, isKVWrappedDuplicate, type KVObject, type KVValue, type ParseOptions} from './types';
-import {createDuplicate, isKVDuplicate} from './types';
+import {MAX_NESTING, type GIBlockEntry, type GIComment, type GICommentLine, type GIDocument, type GIEntry, type GIValueEntry} from './types';
+import {conditionHasInvalidCharacters, isNumericToken, isWhitespace, readToken, scalarValue} from './tokens';
 
-export class KeyValuesParser {
+interface CommentGap {
+    inline: GIComment[];
+    leading: GICommentLine[];
+}
+
+function hasComments(gap: CommentGap): boolean {
+    return gap.inline.length > 0 || gap.leading.some(comment => comment !== null);
+}
+
+class KeyValuesParser {
     private pos = 0;
     private readonly content: string;
-    private options: ParseOptions;
 
-    constructor(content: string, options: ParseOptions = {}) {
+    constructor(content: string) {
         this.content = content;
-        this.options = {
-            keepDuplicates: true,
-            overrideDuplicates: false,
-            wrapDuplicates: false,
-            parseConditionals: true,
-            ...options
-        };
     }
 
-    parse(): KVObject {
-        this.skipWhitespace();
-        const rootKey = this.parseKey();
-        const rootValue = this.parseValue();
-
-        // If root has a single key (like "GameInfo"), return its content
-        if (typeof rootValue === 'object' && !Array.isArray(rootValue) && !isKVWrappedDuplicate(rootValue) && rootKey) {
-            return rootValue;
-        }
-
-        // Otherwise wrap it
-        return { [rootKey]: rootValue } as KVObject;
+    parse(): GIDocument {
+        const header = this.readGap();
+        const leadingComments = [...header.inline, ...header.leading];
+        if (leadingComments[0] === null) leadingComments.shift();
+        const [root, trailingComments] = this.parseEntry(leadingComments, 0);
+        if (this.peek()) throw new Error(`Unexpected trailing content at position ${this.pos}`);
+        if (root.kind === 'flag') throw new Error('Expected a root value');
+        if (trailingComments.at(-1) === null) trailingComments.pop();
+        return trailingComments.length ? {root, trailingComments} : {root};
     }
 
-    private parseKey(): string {
-        this.skipWhitespace();
+    private parseEntry(leadingComments: GICommentLine[], depth: number): [GIEntry, GICommentLine[]] {
+        if (depth > MAX_NESTING) throw new Error(`Maximum nesting depth of ${MAX_NESTING} exceeded`);
 
-        // Handle quoted or unquoted keys
-        if (this.peek() === '"') {
-            return this.parseQuotedString();
-        }
-
-        // Unquoted key: read until whitespace, {, or }
-        const start = this.pos;
-        while (this.pos < this.content.length) {
-            const char = this.peek();
-            if (char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '{' || char === '}') {
-                break;
-            }
-            this.pos++;
-        }
-
-        const key = this.content.slice(start, this.pos);
+        const key = readToken(this.content, this.pos);
         if (!key) throw new Error(`Expected key at position ${this.pos}`);
-        return key;
-    }
+        this.pos = key.end;
+        const afterKey = this.readGap();
+        const base = {key: key.text, ...(leadingComments.length ? {leadingComments} : {})};
 
-    private parseValue(): KVValue {
-        this.skipWhitespace();
-        const char = this.peek();
-
-        // Block value { ... }
-        if (char === '{') {
-            return this.parseBlock();
+        // A final key without a value is a flag (like in hidden_maps).
+        if (depth > 0 && this.peek() === '}') {
+            const flag: GIEntry = {...base, kind: 'flag'};
+            if (afterKey.inline.length) flag.inlineComments = afterKey.inline;
+            return [flag, afterKey.leading];
         }
 
-        // String/number/boolean value
-        const val = this.parseScalar();
-
-        if (this.checkForConditional()) {
-            if (this.options.parseConditionals) return [val, this.parseConditional()] as KVValue;
-            else this.skipConditional();
-        }
-
-        return val;
-    }
-
-    private parseBlock(): KVObject {
-        this.consume('{');
-        const obj: KVObject = {};
-
-        while (true) {
-            this.skipWhitespace();
-            if (this.peek() === '}') break;
-
-            const key = this.parseKey();
-            this.skipWhitespace();
-
-            // Handle empty blocks or keys without values (like in hidden_maps)
-            if (this.peek() === '}') {
-                obj[key] = true; // Flag-style empty value
-                break;
-            }
-
-            const value = this.parseValue();
-
-            if (key in obj && this.options.keepDuplicates) {
-                const existing = obj[key];
-
-                if (existing === undefined) {
-                    obj[key] = value;
-                    continue;
-                }
-
-                if (!Array.isArray(existing) && !this.options.wrapDuplicates) {
-                    obj[key] = createDuplicate([existing, value]);
-                    continue;
-                }
-
-                if (!Array.isArray(existing) && !isKVWrappedDuplicate(existing) && this.options.wrapDuplicates) {
-                    obj[key] = createWrappedDuplicate([existing, value]);
-                    continue;
-                }
-
-                if (this.options.wrapDuplicates && isKVWrappedDuplicate(existing)) {
-                    existing.values.push(value);
-                    continue;
-                }
-
-                if (!this.options.wrapDuplicates && isKVDuplicate(existing)) {
-                    existing.push(value);
-                    continue;
-                }
-            }
-
-            if (key in obj && !this.options.keepDuplicates && !this.options.overrideDuplicates) {
-                continue;
-            }
-
-            obj[key] = value;
-        }
-
-        this.consume('}');
-        return obj;
-    }
-
-    private parseScalar(): KVValue {
-        this.skipWhitespace();
-
-        // Quoted string
-        if (this.peek() === '"') {
-            return this.parseQuotedString();
-        }
-
-        // Unquoted value: read until whitespace, }, or newline
-        const start = this.pos;
-        while (this.pos < this.content.length) {
-            const char = this.peek();
-            if (char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '}') {
-                break;
+        let entry: GIBlockEntry | GIValueEntry;
+        if (this.peek() === '{') {
+            this.pos++;
+            const gap = this.readGap();
+            let comments = [...gap.inline, ...gap.leading];
+            const entries: GIEntry[] = [];
+            while (this.peek() !== '}') {
+                const [child, remaining] = this.parseEntry(comments, depth + 1);
+                entries.push(child);
+                comments = remaining;
             }
             this.pos++;
+            entry = {...base, kind: 'block', entries};
+            if (comments.length) entry.beforeCloseComments = comments;
+        } else {
+            const token = readToken(this.content, this.pos);
+            if (!token) throw new Error(`Expected value at position ${this.pos}`);
+            this.pos = token.end;
+            const value = scalarValue(token);
+            const numberSource = !token.quoted && typeof value === 'string' && isNumericToken(value)
+                ? value
+                : undefined;
+            entry = {...base, kind: 'value', value, ...(numberSource === undefined ? {} : {numberSource})};
         }
 
-        const raw = this.content.slice(start, this.pos).trim();
-
-        // Try to parse as number
-        if (/^-?\d+(\.\d+)?$/.test(raw)) {
-            return parseFloat(raw);
+        if (hasComments(afterKey)) {
+            throw new Error(`Comments between a key and its value or block are unsupported near position ${key.end}`);
         }
-
-        // Try to parse as boolean
-        if (raw === 'true' || raw === '1') return true;
-        if (raw === 'false' || raw === '0') return false;
-
-        return raw;
+        let gap = this.readGap();
+        if (this.peek() === '[') {
+            if (hasComments(gap)) {
+                throw new Error(`Comments before a condition are unsupported near position ${this.pos}`);
+            }
+            entry.condition = this.parseCondition();
+            gap = this.readGap();
+        }
+        if (gap.inline.length) entry.inlineComments = gap.inline;
+        return [entry, gap.leading];
     }
 
-    private parseQuotedString(): string {
-        this.consume('"');
-        let result = '';
-
+    private readGap(): CommentGap {
+        const inline: GIComment[] = [];
+        const leading: GICommentLine[] = [];
+        let ownLine = false;
+        let lineBreaks = 0;
         while (this.pos < this.content.length) {
-            const char = this.content[this.pos];
-
-            if (char === '"') {
-                this.pos++;
-                return result;
-            }
-
-            if (char === '\\') {
-                this.pos++;
-                const next = this.content[this.pos];
-                switch (next) {
-                    case '"': result += '"'; break;
-                    case '\\': result += '\\'; break;
-                    case 'n': result += '\n'; break;
-                    case 't': result += '\t'; break;
-                    default: result += "\\" + next;
+            const start = this.pos;
+            const char = this.peek();
+            if (isWhitespace(char)) {
+                if (char === '\n' || char === '\r') {
+                    ownLine = true;
+                    if (++lineBreaks === 2) leading.push(null);
+                    if (char === '\r' && this.content[this.pos + 1] === '\n') this.pos++;
                 }
                 this.pos++;
-            } else {
-                result += char;
-                this.pos++;
-            }
-        }
-
-        throw new Error('Unterminated string');
-    }
-
-    private skipWhitespace(): void {
-        while (this.pos < this.content.length) {
-            const char = this.content[this.pos];
-
-            // Skip whitespace
-            if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
-                this.pos++;
-                continue;
-            }
-
-            // Skip single-line comments
-            if (char === '/' && this.content[this.pos + 1] === '/') {
-                while (this.pos < this.content.length && this.content[this.pos] !== '\n') {
-                    this.pos++;
-                }
-                continue;
-            }
-
-            // Skip multi-line comments
-            if (char === '/' && this.content[this.pos + 1] === '*') {
+            } else if (this.content.startsWith('//', start)) {
                 this.pos += 2;
-                while (this.pos < this.content.length) {
-                    if (this.content[this.pos] === '*' && this.content[this.pos + 1] === '/') {
-                        this.pos += 2;
-                        break;
-                    }
-                    this.pos++;
-                }
-                continue;
+                while (this.peek() && this.peek() !== '\n' && this.peek() !== '\r') this.pos++;
+                (ownLine ? leading : inline).push(this.content.slice(start + 2, this.pos).trim());
+                lineBreaks = 0;
+            } else if (this.content.startsWith('/*', start)) {
+                const end = this.content.indexOf('*/', start + 2);
+                if (end === -1) throw new Error(`Unterminated block comment at position ${start}`);
+                const text = this.content.slice(start + 2, end);
+                (ownLine ? leading : inline).push({
+                    style: 'block',
+                    text: text.trim().split(/\r\n|\r|\n/).map(part => part.trim()).join('\n'),
+                });
+                if (/[\r\n]/.test(text)) ownLine = true;
+                lineBreaks = 0;
+                this.pos = end + 2;
+            } else {
+                break;
             }
-
-            break;
         }
+        return {inline, leading};
+    }
+
+    private parseCondition(): string {
+        const start = ++this.pos;
+        while (this.peek() && this.peek() !== ']') {
+            if (conditionHasInvalidCharacters(this.peek())) break;
+            this.pos++;
+        }
+        if (this.peek() !== ']') throw new Error(`Expected closing ']' for condition at position ${this.pos}`);
+        const condition = this.content.slice(start, this.pos).trim();
+        this.pos++;
+        return condition;
     }
 
     private peek(): string {
-        return this.content[this.pos] || '';
-    }
-
-    private consume(expected: string): void {
-        if (this.peek() !== expected) {
-            throw new Error(`Expected '${expected}' at position ${this.pos}, got '${this.peek()}'`);
-        }
-        this.pos++;
-    }
-
-    private checkForConditional(): boolean {
-        this.skipWhitespace();
-        return this.peek() === '[';
-    }
-
-    private skipConditional() {
-        while (this.pos < this.content.length) {
-            const char = this.content[this.pos];
-
-            // Check for new line
-            if (char === '\n' || char === '\r') {
-                throw new Error(`Expected closing ']' for condition at position ${this.pos}, but got new line`);
-            }
-
-            if (char === ']') break;
-
-            this.pos++;
-        }
-
-        this.consume(']');
-    }
-
-    private parseConditional(): KVValue {
-        this.consume('[');
-
-        // Conditional: read until "]"
-        const start = this.pos;
-        while (this.pos < this.content.length) {
-            const char = this.peek();
-
-            if (char === ']') {
-                break;
-            }
-
-            if (char === '\n' || char === '\r' || char === '}') {
-                throw new Error(`Expected closing ']' for condition at position ${this.pos}, but got new line`);
-            }
-
-            this.pos++;
-        }
-
-        const cond = this.content.slice(start, this.pos);
-        this.consume(']');
-
-        return cond;
+        return this.content[this.pos] ?? '';
     }
 }
 
-export function parseGI(content: string, options?: ParseOptions): KVObject {
-    return new KeyValuesParser(content, options).parse();
+export function parseGI(content: string): GIDocument {
+    return new KeyValuesParser(content).parse();
 }

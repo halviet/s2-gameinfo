@@ -1,156 +1,74 @@
-import {describe, it, expect} from 'vitest'
-import {composeGI} from "./composer";
-import {createDuplicate, createWrappedDuplicate, type KVObject} from "./types";
+import {assert, describe, expect, it} from 'vitest';
+import {composeGI, parseGI} from './index';
 
 describe('composeGI', () => {
-    it('single block', () => {
-        const kvObj: KVObject = {Block: {}};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"Block"\n\t{\n\t}\n}');
+    it('separates a line comment ending in backslashes from the next active line', () => {
+        const comment = '    // END OF CONFIG ' + '\\'.repeat(2);
+        const unsafe = ['GameInfo', '{', comment, '    rate', '    {', '        min "98304"', '    }', '}', ''].join('\n');
+        const safe = unsafe.replace(comment + '\n', comment + '\n\n');
+        const document = parseGI(unsafe);
+        expect(composeGI(document)).toBe(safe);
+        expect(composeGI(parseGI(safe))).toBe(safe);
+        expect(composeGI(document, {stripComments: true})).toBe(unsafe.replace(comment + '\n', ''));
     });
 
-    it('string value', () => {
-        const kvObj: KVObject = {key: "value"};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value"\n}');
+    it('also separates an inline comment ending in a backslash without breaking consecutive comment lines', () => {
+        const input = ['GameInfo', '{', '    // Title \\', '    // Subtitle', '    first 1 // Note \\', '    second 2', '}', ''].join('\n');
+        expect(composeGI(parseGI(input))).toBe(input.replace('\n    second 2', '\n\n    second 2'));
     });
 
-    it('number value', () => {
-        const kvObj: KVObject = {key: 10};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" 10\n}');
+    it('composes a new document with readable defaults', () => {
+        expect(composeGI({
+            root: {
+                key: 'GameInfo', kind: 'block',
+                entries: [
+                    {key: 'name', kind: 'value', value: 'citadel'},
+                    {key: 'enabled', kind: 'value', value: false, condition: '$WIN32'},
+                ],
+            },
+        })).toBe('GameInfo\n{\n    name "citadel"\n    enabled false [$WIN32]\n}\n');
     });
 
-    it('boolean value: true', () => {
-        const kvObj: KVObject = {key: true};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" 1\n}');
+    it.each([42, 1e-7, true, false, 'say "hello"\nthen\tleave\\', '001', ''])('round-trips an edited value %j', value => {
+        const document = parseGI('key 0');
+        assert(document.root.kind === 'value');
+        document.root.value = value;
+        expect(parseGI(composeGI(document)).root).toMatchObject({key: 'key', value});
     });
 
-    it('boolean value: false', () => {
-        const kvObj: KVObject = {key: false};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" 0\n}');
+    it('quotes edited keys that contain spaces', () => {
+        const document = parseGI('GameInfo {key"value"other 2}');
+        assert(document.root.kind === 'block');
+        const [first, second] = document.root.entries;
+        assert(first?.kind === 'value' && second);
+        first.value = 1;
+        expect(composeGI(document)).toBe('GameInfo\n{\n    key 1\n    other 2\n}\n');
+        second.key = 'renamed key';
+        expect(composeGI(document)).toBe('GameInfo\n{\n    key 1\n    "renamed key" 2\n}\n');
     });
 
-    it('condition value', () => {
-        const kvObj: KVObject = {key: ["value", " $COND "]};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value" [ $COND ]\n}');
+    it('keeps new line comments from swallowing the next entry', () => {
+        const document = parseGI('GameInfo {key 1 other 2}');
+        assert(document.root.kind === 'block');
+        const entry = document.root.entries[0];
+        assert(entry);
+        entry.inlineComments = [' new comment'];
+        expect(composeGI(document)).toBe('GameInfo\n{\n    key 1 // new comment\n    other 2\n}\n');
     });
 
-    it('quoted value, {quoteValues: "always"}', () => {
-        const kvObj: KVObject = {key: "value"};
-        expect(composeGI(kvObj, {
-            quoteValues: 'always',
-        })).toEqual('"GameInfo"\n{\n\t"key" "value"\n}');
+    it.each([Infinity, -Infinity, NaN, 9007199254740992])('rejects an invalid edited number %j', value => {
+        expect(() => composeGI({root: {key: 'key', kind: 'value', value}})).toThrow(/finite number or a safe integer/);
     });
 
-    it('unquoted value, {quoteValues: "never"}', () => {
-        const kvObj: KVObject = {key: "value"};
-        expect(composeGI(kvObj, {
-            quoteValues: 'never',
-        })).toEqual('"GameInfo"\n{\n\t"key" value\n}');
+    it.each(['$WIN32] extra 1', '$WIN32\n', '$WIN32}'])('rejects unsafe conditional text %j', condition => {
+        expect(() => composeGI({root: {key: 'key', kind: 'value', value: 1, condition}})).toThrow(/Invalid conditional/);
     });
 
-    it('auto quote value, {quoteValues: "auto"}', () => {
-        const kvObj: KVObject = {key: "value"};
-        expect(composeGI(kvObj, {
-            quoteValues: 'auto',
-        })).toEqual('"GameInfo"\n{\n\t"key" value\n}');
+    it('prefixes each line of edited line comments and rejects block delimiter injection', () => {
+        const document = parseGI('key value // comment');
+        document.root.inlineComments = ['one\n\ninjected 1'];
+        expect(composeGI(document)).toBe('key "value" // one\n//\n// injected 1\n');
+        document.root.inlineComments = [{style: 'block', text: 'one */ injected 1'}];
+        expect(() => composeGI(document)).toThrow(/closing delimiter/);
     });
-
-    it('auto quote empty value, {quoteValues: "auto"}', () => {
-        const kvObj: KVObject = {key: ""};
-        expect(composeGI(kvObj, {
-            quoteValues: 'auto',
-        })).toEqual('"GameInfo"\n{\n\t"key" ""\n}');
-    });
-
-    it('auto quote value starting with number, {quoteValues: "auto"}', () => {
-        const kvObj: KVObject = {key: "0value"};
-        expect(composeGI(kvObj, {
-            quoteValues: 'auto',
-        })).toEqual('"GameInfo"\n{\n\t"key" "0value"\n}');
-    });
-
-    it('value with "/"', () => {
-        const kvObj: KVObject = {key: "value/value"};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value/value"\n}');
-    });
-
-    it('value with "*"', () => {
-        const kvObj: KVObject = {key: "value_*VALUE*"};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value_*VALUE*"\n}');
-    });
-
-    it('quoted key, {quoteKeys: "always"}', () => {
-        const kvObj: KVObject = {key: "value"};
-        expect(composeGI(kvObj, {
-            quoteKeys: 'always',
-        })).toEqual('"GameInfo"\n{\n\t"key" "value"\n}');
-    });
-
-    it('unquoted key, {quoteKeys: "never"}', () => {
-        const kvObj: KVObject = {key: "value"};
-        expect(composeGI(kvObj, {
-            quoteKeys: 'never',
-        })).toEqual('GameInfo\n{\n\tkey "value"\n}');
-    });
-
-    it('auto quote key, {quoteKeys: "auto"}', () => {
-        const kvObj: KVObject = {key: "value"};
-        expect(composeGI(kvObj, {
-            quoteKeys: 'auto',
-        })).toEqual('GameInfo\n{\n\tkey "value"\n}');
-    });
-
-    it('auto quote key with spaces, {quoteKeys: "auto"}', () => {
-        const kvObj: KVObject = {"key test": "value"};
-        expect(composeGI(kvObj, {
-            quoteKeys: 'auto',
-        })).toEqual('GameInfo\n{\n\t"key test" "value"\n}');
-    });
-
-    it('duplicate key', () => {
-        const kvObj: KVObject = {"key": createDuplicate(["value1", "value2"])};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value1"\n\t"key" "value2"\n}');
-    });
-
-    it('duplicate key with object value', () => {
-        const kvObj: KVObject = {"key": createDuplicate(["value1", {"key2": "value2"} as KVObject])};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value1"\n\t"key"\n\t{\n\t\t"key2" "value2"\n\t}\n}');
-    });
-
-    it('wrapped duplicate key', () => {
-        const kvObj: KVObject = {"key": createWrappedDuplicate(["value1", "value2"])};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value1"\n\t"key" "value2"\n}');
-    });
-
-    it('wrapped duplicate key with object value', () => {
-        const kvObj: KVObject = {"key": createWrappedDuplicate(["value1", {"key2": "value2"} as KVObject])};
-        expect(composeGI(kvObj)).toEqual('"GameInfo"\n{\n\t"key" "value1"\n\t"key"\n\t{\n\t\t"key2" "value2"\n\t}\n}');
-    });
-
-    it('comment in header', () => {
-        const kvObj: KVObject = {key: 1};
-        expect(composeGI(kvObj, {
-            comments: { header: ["Test comment"] }
-        })).toEqual('// Test comment\n"GameInfo"\n{\n\t"key" 1\n}');
-    });
-
-    it('multi-line comment in header', () => {
-        const kvObj: KVObject = {key: 1};
-        expect(composeGI(kvObj, {
-            comments: { header: ["Test comment", "Test comment 2"] }
-        })).toEqual('// Test comment\n// Test comment 2\n"GameInfo"\n{\n\t"key" 1\n}');
-    });
-
-    it('comment in convars', () => {
-        const kvObj: KVObject = {"ConVars": {key: 1}};
-        expect(composeGI(kvObj, {
-            comments: { convars: ["Test comment"] }
-        })).toEqual('"GameInfo"\n{\n\t// Test comment\n\t"ConVars"\n\t{\n\t\t"key" 1\n\t}\n}');
-    });
-
-    it('multi-line comment in convars', () => {
-        const kvObj: KVObject = {"ConVars": {key: 1}};
-        expect(composeGI(kvObj, {
-            comments: { convars: ["Test comment", "Test comment 2"] }
-        })).toEqual('"GameInfo"\n{\n\t// Test comment\n\t// Test comment 2\n\t"ConVars"\n\t{\n\t\t"key" 1\n\t}\n}');
-    });
-})
+});
