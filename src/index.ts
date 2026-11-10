@@ -1,22 +1,14 @@
-export { parseGI } from './parser';
-export { composeGI } from './composer';
-export type { ParseOptions, ComposeOptions } from './types';
-
+export {parseGI} from './parser';
+export {composeGI} from './composer';
+export {findGIEntries, findGIEntry, findGIValueEntry} from './navigation';
 export type {
-    KVPrimitive,
-    KVDuplicate,
-    DuplicateBrand,
-    KVWrappedDuplicate,
-    KVCond,
-    KVValue,
-    KVObject,
-} from './types';
-
-export {
-    isKVDuplicate,
-    isKVWrappedDuplicate,
-    isKVCond,
-    isKVPrimitive,
-    createDuplicate,
-    createWrappedDuplicate
+    ComposeOptions,
+    GIBlockEntry,
+    GIComment,
+    GICommentLine,
+    GIDocument,
+    GIEntry,
+    GIFlagEntry,
+    GIPrimitive,
+    GIValueEntry,
 } from './types';

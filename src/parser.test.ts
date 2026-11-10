@@ -1,198 +1,89 @@
-import {describe, it, expect} from 'vitest'
-import {parseGI} from "./parser";
-import {createWrappedDuplicate, type KVValue} from "./types";
+import {assert, describe, expect, it} from 'vitest';
+import {parseGI} from './index';
 
 describe('parseGI', () => {
-    it('single block', () => {
-        const gi = kvBlock("GameInfo", kvBlock("Test"));
-        expect(parseGI(gi)).toStrictEqual({Test: {}});
+    it('reads the original root name and nested blocks in order', () => {
+        const {root} = parseGI('"CustomRoot" { "First" {} Second { flag } }');
+        assert(root.kind === 'block');
+        expect(root.key).toBe('CustomRoot');
+        expect(root.entries).toMatchObject([
+            {key: 'First', kind: 'block', entries: []},
+            {key: 'Second', kind: 'block', entries: [{key: 'flag', kind: 'flag'}]},
+        ]);
     });
 
-    it('multiple blocks', () => {
-        const gi = kvBlock("GameInfo", kvBlock("Test1", ""), kvBlock("Test2"));
-        expect(parseGI(gi)).toStrictEqual({Test1: {}, Test2: {}});
+    it.each([
+        ['plain', 'plain'],
+        ['path/to/file', 'path/to/file'],
+        ['value_*VALUE*', 'value_*VALUE*'],
+        ['http://example.com', 'http://example.com'],
+        ['""', ''],
+        ['"42"', '42'],
+        ['"true"', 'true'],
+        ['42', 42],
+        ['-2.5', -2.5],
+        ['1e-7', 1e-7],
+        ['9007199254740993', '9007199254740993'],
+        ['9e999', '9e999'],
+        ['true', true],
+        ['false', false],
+        [String.raw`"test\value"`, 'test\\value'],
+        [String.raw`"test\\value"`, 'test\\value'],
+        [String.raw`"\"value\""`, '"value"'],
+        [String.raw`"first\nsecond\tend"`, 'first\nsecond\tend'],
+    ])('reads scalar %j', (input, expected) => {
+        const {root} = parseGI('test ' + input);
+        assert(root.kind === 'value');
+        expect(root.value).toBe(expected);
     });
 
-    it('quoted key', () => {
-        const gi = kvBlock("GameInfo", kvPair('"test"', 1));
-        expect(parseGI(gi)).toStrictEqual({test: 1});
-    });
-
-    it('unquoted key', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", 1));
-        expect(parseGI(gi)).toStrictEqual({test: 1});
-    });
-
-    it('string value', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", "value"));
-        expect(parseGI(gi)).toStrictEqual({test: "value"});
-    });
-
-    it('number value', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", 10));
-        expect(parseGI(gi)).toStrictEqual({test: 10});
-    });
-
-    it('condition value', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", '"value" [ $COND ]'));
-        expect(parseGI(gi, {parseConditionals: true})).toStrictEqual({test: ["value", " $COND "]});
-    });
-
-    it('do not parse condition value', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", '"value" [ $COND ]'));
-        expect(parseGI(gi, {parseConditionals: false})).toStrictEqual({test: "value"});
-    });
-
-    it('on parseConditionals: true - should throw Error: Expected closing \']\' for condition', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", `"value" [ $COND `));
-        expect(() => parseGI(gi, {parseConditionals: true})).toThrowError(/Expected closing ']' for condition/);
-    });
-
-    it('on parseConditionals: false - should throw Error: Expected closing \']\' for condition', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", `"value" [ $COND `));
-        expect(() => parseGI(gi, {parseConditionals: false})).toThrowError(/Expected closing ']' for condition/);
-    });
-
-    it('with comment', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", "value // Test comment"));
-        expect(parseGI(gi)).toStrictEqual({test: "value"});
-    });
-
-    it('with multi-line comment', () => {
-        const gi = kvBlock("GameInfo", `/* Test\nComment */`, kvPair("test", "value"));
-        expect(parseGI(gi)).toStrictEqual({test: "value"});
-    });
-
-    it('handle value with "/"', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", "value/value"));
-        expect(parseGI(gi)).toStrictEqual({test: "value/value"});
-    });
-
-    it('handle value with "*"', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", "value_*VALUE*"));
-        expect(parseGI(gi)).toStrictEqual({test: "value_*VALUE*"});
-    });
-
-    it('single kv', () => {
-        const gi = kvPair("test", "value");
-        expect(parseGI(gi)).toStrictEqual({test: "value"});
-    });
-
-    it('empty key', () => {
-        const gi = kvBlock("GameInfo", "test");
-        expect(parseGI(gi)).toStrictEqual({test: true});
-    });
-
-    it('duplicated key', () => {
-        const gi = kvBlock("GameInfo",
-            kvPair("test", "value"),
-            kvPair("test", "value2"),
+    it('preserves leading, inline, before-close, and trailing comments', () => {
+        const {root, trailingComments} = parseGI(
+            '// header\nGameInfo {\n // above\n x value [$WIN32] /* one\n two */\n // before close\n} // after root\n // footer',
         );
-        expect(parseGI(gi)).toStrictEqual({test: ["value", "value2"]});
+        assert(root.kind === 'block');
+        const child = root.entries[0];
+        assert(child?.kind === 'value');
+        expect(root.leadingComments).toEqual(['header']);
+        expect(child.leadingComments).toEqual(['above']);
+        expect(child.inlineComments).toEqual([{style: 'block', text: 'one\ntwo'}]);
+        expect(root.beforeCloseComments).toEqual(['before close']);
+        expect(root.inlineComments).toEqual(['after root']);
+        expect(trailingComments).toEqual(['footer']);
     });
 
-    it('duplicated key with object value', () => {
-        const gi = kvBlock("GameInfo",
-            kvPair("test", "value"),
-            kvBlock("test",
-                kvPair("test", "value")
-            )
-        );
-        expect(parseGI(gi)).toStrictEqual({test: ["value", {test: "value"}]});
+    it.each([
+        ['GameInfo { fps_max /* cap */ 120 }', /Comments between a key and its value or block/],
+        ['GameInfo // block\n{}', /Comments between a key and its value or block/],
+        ['GameInfo { Game citadel /* platform */ [$WIN32] }', /Comments before a condition/],
+        ['GameInfo { Feature {} // platform\n[$WIN32] }', /Comments before a condition/],
+    ])('rejects comments between entry tokens in %j', (input, error) => {
+        expect(() => parseGI(input)).toThrow(error);
     });
 
-    it('override on duplicate, keepDuplicates: false', () => {
-        const gi = kvBlock("GameInfo",
-            kvPair("test", "value"),
-            kvPair("test", "value2"),
-        );
-        expect(parseGI(gi, {overrideDuplicates: true, keepDuplicates: false})).toStrictEqual({test: "value2"});
+    it('keeps conditions on blocks', () => {
+        const {root} = parseGI('GameInfo { Feature {} [$WIN32] }');
+        assert(root.kind === 'block');
+        expect(root.entries[0]).toMatchObject({kind: 'block', condition: '$WIN32'});
     });
 
-    it('do not override on duplicate, keepDuplicates: false', () => {
-        const gi = kvBlock("GameInfo",
-            kvPair("test", "value"),
-            kvPair("test", "value2"),
-        );
-        expect(parseGI(gi, {overrideDuplicates: false, keepDuplicates: false})).toStrictEqual({test: "value"});
+    it.each(['GameInfo', 'GameInfo }', 'GameInfo // no value'])('rejects a missing root value in %j', input => {
+        expect(() => parseGI(input)).toThrow(/Expected value/);
     });
 
-    it('duplicated key, wrapDuplicates: true', () => {
-        const gi = kvBlock("GameInfo",
-            kvPair("test", "value"),
-            kvPair("test", "value2"),
-        );
-        expect(parseGI(gi, {wrapDuplicates: true})).toStrictEqual({test: createWrappedDuplicate(["value", "value2"])});
+    it.each([
+        ['GameInfo {} GameInfo {}', /Unexpected trailing content/],
+        ['GameInfo {} /* incomplete', /Unterminated block comment/],
+        ['GameInfo { key "value', /Unterminated string/],
+        ['GameInfo { key value [$WIN32\n}', /Expected closing '\]' for condition/],
+        ['GameInfo { key value [$WIN32', /Expected closing '\]' for condition/],
+        ['GameInfo {', /Expected key/],
+        ['', /Expected key/],
+    ])('rejects malformed input %j', (input, error) => {
+        expect(() => parseGI(input)).toThrow(error);
     });
 
-    it('duplicated key with object value, wrapDuplicates: true', () => {
-        const gi = kvBlock("GameInfo",
-            kvPair("test", "value"),
-            kvBlock("test",
-                kvPair("test", "value")
-            )
-        );
-        expect(parseGI(gi, {wrapDuplicates: true})).toStrictEqual({test: createWrappedDuplicate(["value", {test: "value"}])});
+    it('reports excessive nesting before exhausting the call stack', () => {
+        expect(() => parseGI('block {'.repeat(514) + '}'.repeat(514))).toThrow(/Maximum nesting depth/);
     });
-
-    it('override on duplicate, keepDuplicates: false; wrapDuplicates: true', () => {
-        const gi = kvBlock("GameInfo",
-            kvPair("test", "value"),
-            kvPair("test", "value2"),
-        );
-        expect(parseGI(gi, {overrideDuplicates: true, keepDuplicates: false, wrapDuplicates: true})).toStrictEqual({test: "value2"});
-    });
-
-    it('do not override on duplicate, keepDuplicates: false; wrapDuplicates: true', () => {
-        const gi = kvBlock("GameInfo",
-            kvPair("test", "value"),
-            kvPair("test", "value2"),
-        );
-        expect(parseGI(gi, {overrideDuplicates: false, keepDuplicates: false, wrapDuplicates: true})).toStrictEqual({test: "value"});
-    });
-
-    it('single \\', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", `"test\\value"`));
-        expect(parseGI(gi)).toStrictEqual({test: "test\\value"});
-    });
-
-    it('escaped \\\\', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", `"test\\\\value"`));
-        expect(parseGI(gi)).toStrictEqual({test: "test\\value"});
-    });
-
-    it('escaped \"', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", `"\\"value\\""`));
-        expect(parseGI(gi)).toStrictEqual({test: '\"value\"'});
-    });
-
-    it('escaped \\n', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", `"value\\n"`));
-        expect(parseGI(gi)).toStrictEqual({test: "value\n"});
-    });
-
-    it('escaped \\t', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", `"value\\t"`));
-        expect(parseGI(gi)).toStrictEqual({test: "value\t"});
-    });
-
-    it('should throw Error: Unterminated string', () => {
-        const gi = kvBlock("GameInfo", kvPair("test", `"value`));
-        expect(() => parseGI(gi)).toThrowError("Unterminated string");
-    });
-})
-
-function kvBlock(key: string, ...content: string[]): string {
-    let block = `${key}\n{\n`;
-
-    content.forEach((v) => {
-        block += `${v}\n`;
-    });
-    block += "}";
-
-    return block;
-}
-
-function kvPair(key: string, value: KVValue): string {
-    return `${key} ${value}`;
-}
+});
