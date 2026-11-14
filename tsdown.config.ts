@@ -6,7 +6,8 @@ const config: UserConfig = defineConfig({
   outDir: 'dist/',
   format: ['esm', 'cjs'],
 
-  dts: true,
+  // Oxc's declaration pass tries to parse the ConVar JSON catalog as TypeScript.
+  dts: { oxc: false },
 
   sourcemap: true,
   minify: true,

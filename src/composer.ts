@@ -36,7 +36,7 @@ export function composeGI(document: GIDocument, options: ComposeOptions = {}): s
         afterBackslashComment = false;
     }
 
-    function writeComments(comments: GICommentLine[] | undefined, indent: string, prefix?: string): string {
+    function writeComments(comments: GICommentLine[] | undefined, indent: string, prefix?: string, commentedOut = false): string {
         let line = prefix ?? '';
         if (comments === undefined) return line;
 
@@ -50,7 +50,7 @@ export function composeGI(document: GIDocument, options: ComposeOptions = {}): s
             } else if (typeof comment === 'string') {
                 for (const text of comment.split(/\r\n|\r|\n/)) {
                     const trimmed = text.trim();
-                    writeLine(append(line, trimmed ? '// ' + trimmed : '//', indent), !line);
+                    writeLine(append(line, trimmed ? '// ' + trimmed : '//', indent), !line || commentedOut);
                     afterBackslashComment = trimmed.endsWith('\\');
                     line = '';
                 }
@@ -71,6 +71,8 @@ export function composeGI(document: GIDocument, options: ComposeOptions = {}): s
         if (depth > MAX_NESTING) throw new Error(`Maximum nesting depth of ${MAX_NESTING} exceeded`);
         const indent = '    '.repeat(depth);
         writeComments(entry.leadingComments, indent);
+        const commentedOut = entry.kind === 'value' && entry.commentedOut === true;
+        if (commentedOut && options.stripComments) return;
         let line = indent + formatKey(entry.key);
 
         if (entry.kind !== 'flag') {
@@ -90,8 +92,12 @@ export function composeGI(document: GIDocument, options: ComposeOptions = {}): s
             }
         }
 
-        line = writeComments(entry.inlineComments, indent, line);
-        if (line) writeLine(line);
+        if (commentedOut) line = indent + '// ' + line.slice(indent.length);
+        line = writeComments(entry.inlineComments, indent, line, commentedOut);
+        if (line) {
+            writeLine(line, commentedOut);
+            afterBackslashComment = commentedOut && line.endsWith('\\');
+        }
     }
 
     writeEntry(document.root, 0);
