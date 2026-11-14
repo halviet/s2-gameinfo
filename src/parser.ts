@@ -1,5 +1,12 @@
-import {MAX_NESTING, type GIBlockEntry, type GIComment, type GICommentLine, type GIDocument, type GIEntry, type GIValueEntry} from './types';
+import catalog from './convars.json';
+import {MAX_NESTING, type ConVarInfo, type GIBlockEntry, type GIComment, type GICommentLine, type GIDocument, type GIEntry, type GIValueEntry, type ParseOptions} from './types';
 import {conditionHasInvalidCharacters, isNumericToken, isWhitespace, readToken, scalarValue} from './tokens';
+
+const conVars: Readonly<Record<string, ConVarInfo>> = catalog;
+
+export function findConVar(name: string): ConVarInfo | undefined {
+    return Object.hasOwn(conVars, name) ? conVars[name] : undefined;
+}
 
 interface CommentGap {
     inline: GIComment[];
@@ -10,11 +17,30 @@ function hasComments(gap: CommentGap): boolean {
     return gap.inline.length > 0 || gap.leading.some(comment => comment !== null);
 }
 
+function parseCommentedConVar(comment: GICommentLine): GIValueEntry | undefined {
+    if (typeof comment !== 'string') return;
+
+    try {
+        const key = readToken(comment, 0);
+        if (!key || !findConVar(key.text) || !isWhitespace(comment[key.end] ?? '')) return;
+        let valueStart = key.end;
+        while (isWhitespace(comment[valueStart] ?? '')) valueStart++;
+        if (!readToken(comment, valueStart)) return;
+
+        const {root, trailingComments} = parseGI(comment);
+        if (root.kind !== 'value' || trailingComments) return;
+
+        return {...root, commentedOut: true};
+    } catch {
+        return;
+    }
+}
+
 class KeyValuesParser {
     private pos = 0;
     private readonly content: string;
 
-    constructor(content: string) {
+    constructor(content: string, private readonly options: ParseOptions) {
         this.content = content;
     }
 
@@ -49,12 +75,26 @@ class KeyValuesParser {
         if (this.peek() === '{') {
             this.pos++;
             const gap = this.readGap();
-            let comments = [...gap.inline, ...gap.leading];
+            let comments: GICommentLine[] = [...gap.inline];
+            let leading = gap.leading;
             const entries: GIEntry[] = [];
-            while (this.peek() !== '}') {
+            const parseDisabled = this.options.parseCommentedConVars && key.text === 'ConVars';
+            for (;;) {
+                for (const comment of leading) {
+                    const disabled = parseDisabled ? parseCommentedConVar(comment) : undefined;
+                    if (disabled) {
+                        if (comments.length) disabled.leadingComments = comments;
+                        entries.push(disabled);
+                        comments = [];
+                    } else {
+                        comments.push(comment);
+                    }
+                }
+                if (this.peek() === '}') break;
                 const [child, remaining] = this.parseEntry(comments, depth + 1);
                 entries.push(child);
-                comments = remaining;
+                comments = [];
+                leading = remaining;
             }
             this.pos++;
             entry = {...base, kind: 'block', entries};
@@ -140,6 +180,6 @@ class KeyValuesParser {
     }
 }
 
-export function parseGI(content: string): GIDocument {
-    return new KeyValuesParser(content).parse();
+export function parseGI(content: string, options: ParseOptions = {}): GIDocument {
+    return new KeyValuesParser(content, options).parse();
 }
